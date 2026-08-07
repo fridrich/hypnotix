@@ -166,7 +166,7 @@ class ChannelWidget(Gtk.ListBoxRow):
                         stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
                         title = prog.get("title", "")
 
-                        header_label = f"{title_hdr} ({start_str} - {stop_str}):   {title}"
+                        header_label = _("%s (%s - %s):   %s") % (title_hdr, start_str, stop_str, title)
                         header_item = Gtk.MenuItem(label=header_label)
                         header_item.set_sensitive(False)
                         info_menu.append(header_item)
@@ -206,7 +206,7 @@ class ChannelWidget(Gtk.ListBoxRow):
                         if last_date is not None:
                             guide_menu.append(Gtk.SeparatorMenuItem())
                         date_str = prog_dt.strftime("%A, %d %b %Y")
-                        date_header = Gtk.MenuItem(label=f"--- {date_str} ---")
+                        date_header = Gtk.MenuItem(label=_("--- %s ---") % date_str)
                         date_header.set_sensitive(False)
                         guide_menu.append(date_header)
                         last_date = prog_date
@@ -215,7 +215,7 @@ class ChannelWidget(Gtk.ListBoxRow):
                     stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
                     title = prog.get("title", "")
 
-                    prog_label = f"{start_str} - {stop_str}   {title}"
+                    prog_label = _("%s - %s   %s") % (start_str, stop_str, title)
                     prog_item = Gtk.MenuItem(label=prog_label)
 
                     desc_menu = Gtk.Menu()
@@ -727,7 +727,7 @@ class MainWindow:
                     stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
 
                     hdr_label = Gtk.Label()
-                    hdr_label.set_markup(f"<b>{title_hdr} ({start_str} - {stop_str}):</b>")
+                    hdr_label.set_markup(_("<b>%s (%s - %s):</b>") % (title_hdr, start_str, stop_str))
                     hdr_label.set_xalign(0)
                     grid.attach(hdr_label, 0, row, 1, 1)
                     row += 1
