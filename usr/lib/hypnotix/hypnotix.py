@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 import gettext
 import locale
+import datetime
+import textwrap
 import os
 import shutil
 import sys
@@ -84,9 +86,10 @@ with open(os.path.join(PKG_DATA_DIR, "countries.list")) as f:
 class ChannelWidget(Gtk.ListBoxRow):
     """ A custom widget for displaying and holding channel data. """
 
-    def __init__(self, channel, logo, **kwargs):
+    def __init__(self, channel, logo, main_window=None, **kwargs):
         super().__init__(**kwargs)
         self._channel = channel
+        self.main_window = main_window
         self.set_tooltip_text(channel.name)
 
         frame = Gtk.Frame()
@@ -109,8 +112,15 @@ class ChannelWidget(Gtk.ListBoxRow):
         box.pack_start(self.epg_label, False, False, 0)
         box.set_spacing(6)
         frame.add(box)
-        self.add(frame)
+
+        # Wrap frame in an EventBox so right-click events are captured cleanly
+        event_box = Gtk.EventBox()
+        event_box.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        event_box.add(frame)
+        self.add(event_box)
+
         self.name_label.show()
+        event_box.connect("button-press-event", self.on_button_press)
 
     @property
     def channel(self):
@@ -127,6 +137,99 @@ class ChannelWidget(Gtk.ListBoxRow):
                 return
         self.epg_label.hide()
         self.name_label.show()
+
+    def on_button_press(self, widget, event):
+        if event.type == Gdk.EventType.BUTTON_PRESS and event.button == 3:  # Right-click
+            menu = Gtk.Menu()
+
+            epg_mgr = None
+            if self.main_window and self.main_window.active_provider:
+                epg_mgr = getattr(self.main_window.active_provider, "epg_manager", None)
+
+            xmltv_id = getattr(self._channel, "xmltv_id", None)
+
+            # 1. Info Entry
+            info_item = Gtk.MenuItem(label=_("Info"))
+            now_playing, next_up = (None, None)
+            if epg_mgr and xmltv_id:
+                now_playing, next_up = epg_mgr.get_current_and_next(xmltv_id)
+
+            if not now_playing and not next_up:
+                info_item.set_sensitive(False)
+            else:
+
+                info_menu = Gtk.Menu()
+                added_section = False
+                for title_hdr, prog in [(_("Now Playing"), now_playing), (_("Next Up"), next_up)]:
+                    if prog:
+                        if added_section:
+                            info_menu.append(Gtk.SeparatorMenuItem())
+                        added_section = True
+
+                        start_str = datetime.datetime.fromtimestamp(prog["start"]).strftime("%H:%M")
+                        stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
+                        title = prog.get("title", "")
+
+                        header_label = f"{title_hdr} ({start_str} - {stop_str}):   {title}"
+                        header_item = Gtk.MenuItem(label=header_label)
+                        header_item.set_sensitive(False)
+                        info_menu.append(header_item)
+
+                        desc = prog.get("desc", "").strip()
+                        if desc:
+                            wrapped_desc = "\n".join(textwrap.wrap(desc, width=60))
+                            desc_item = Gtk.MenuItem(label=wrapped_desc)
+                            desc_item.set_sensitive(False)
+                            info_menu.append(desc_item)
+                        else:
+                            desc_item = Gtk.MenuItem(label=_("No description available"))
+                            desc_item.set_sensitive(False)
+                            info_menu.append(desc_item)
+
+                info_item.set_submenu(info_menu)
+
+            menu.append(info_item)
+
+            # 2. Guide Entry
+            guide_item = Gtk.MenuItem(label=_("Guide"))
+            programmes = []
+            if epg_mgr and xmltv_id:
+                programmes = epg_mgr.programmes.get(xmltv_id, [])
+
+            if not programmes:
+                guide_item.set_sensitive(False)
+            else:
+                guide_menu = Gtk.Menu()
+                for prog in programmes:
+                    start_str = datetime.datetime.fromtimestamp(prog["start"]).strftime("%H:%M")
+                    stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
+                    title = prog.get("title", "")
+
+                    prog_label = f"{start_str} - {stop_str}   {title}"
+                    prog_item = Gtk.MenuItem(label=prog_label)
+
+                    desc_menu = Gtk.Menu()
+                    desc = prog.get("desc", "").strip()
+                    if desc:
+                        wrapped_desc = "\n".join(textwrap.wrap(desc, width=60))
+                        desc_item = Gtk.MenuItem(label=wrapped_desc)
+                        desc_item.set_sensitive(False)
+                        desc_menu.append(desc_item)
+                    else:
+                        desc_item = Gtk.MenuItem(label=_("No description available"))
+                        desc_item.set_sensitive(False)
+                        desc_menu.append(desc_item)
+
+                    prog_item.set_submenu(desc_menu)
+                    guide_menu.append(prog_item)
+
+                guide_item.set_submenu(guide_menu)
+
+            menu.append(guide_item)
+            menu.show_all()
+            menu.popup_at_pointer(event)
+            return True
+        return False
 
 class MyApplication(Gtk.Application):
     # Main initialization routine
@@ -608,7 +711,7 @@ class MainWindow:
             for channel in channels:
                 image = Gtk.Image().new_from_surface(self.get_channel_surface(channel.logo_path))
                 logos_to_refresh.append((channel, image))
-                self.channels_listbox.add(ChannelWidget(channel, image))
+                self.channels_listbox.add(ChannelWidget(channel, image, main_window=self))
 
             self.channels_listbox.show_all()
 
@@ -632,6 +735,61 @@ class MainWindow:
             if isinstance(widget, ChannelWidget):
                 widget.update_epg(epg_mgr)
         return True
+
+    def show_channel_epg_info(self, channel):
+        """Displays EPG details for current and next program of a channel."""
+        dialog = Gtk.Dialog(title=_("Channel Info - %s") % channel.name, transient_for=self.window, flags=0)
+        dialog.add_button(_("Close"), Gtk.ResponseType.CLOSE)
+        dialog.set_default_size(450, 300)
+
+        box = dialog.get_content_area()
+        box.set_spacing(12)
+        box.set_border_width(12)
+
+        epg_mgr = getattr(self.active_provider, "epg_manager", None) if self.active_provider else None
+        now_playing, next_up = (None, None)
+        if epg_mgr and getattr(channel, "xmltv_id", None):
+            now_playing, next_up = epg_mgr.get_current_and_next(channel.xmltv_id)
+
+        if not now_playing and not next_up:
+            label = Gtk.Label(label=_("No EPG information available for this channel."))
+            box.pack_start(label, True, True, 0)
+        else:
+            grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+            row = 0
+
+            for title_hdr, prog in [(_("Now Playing"), now_playing), (_("Next Up"), next_up)]:
+                if prog:
+                    start_str = datetime.datetime.fromtimestamp(prog["start"]).strftime("%H:%M")
+                    stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
+
+                    hdr_label = Gtk.Label()
+                    hdr_label.set_markup(f"<b>{title_hdr} ({start_str} - {stop_str}):</b>")
+                    hdr_label.set_xalign(0)
+                    grid.attach(hdr_label, 0, row, 1, 1)
+                    row += 1
+
+                    title_lbl = Gtk.Label(label=prog.get("title", ""))
+                    title_lbl.set_xalign(0)
+                    grid.attach(title_lbl, 0, row, 1, 1)
+                    row += 1
+
+                    if prog.get("desc"):
+                        desc_lbl = Gtk.Label(label=prog["desc"])
+                        desc_lbl.set_xalign(0)
+                        desc_lbl.set_line_wrap(True)
+                        desc_lbl.get_style_context().add_class("dim-label")
+                        grid.attach(desc_lbl, 0, row, 1, 1)
+                        row += 1
+
+            scrolled = Gtk.ScrolledWindow()
+            scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            scrolled.add(grid)
+            box.pack_start(scrolled, True, True, 0)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
 
     def show_vod(self, items):
         logos_to_refresh = []
