@@ -1396,11 +1396,11 @@ class MainWindow:
         for widget in widgets:
             widget.hide()
         visible_widgets = []
+        visible_widgets.append(self.epg_label)
+        visible_widgets.append(self.epg_entry)
         if type_id == PROVIDER_TYPE_URL:
             visible_widgets.append(self.url_entry)
             visible_widgets.append(self.url_label)
-            visible_widgets.append(self.epg_label)
-            visible_widgets.append(self.epg_entry)
         elif type_id == PROVIDER_TYPE_LOCAL:
             visible_widgets.append(self.path_entry)
             visible_widgets.append(self.path_label)
@@ -1412,8 +1412,6 @@ class MainWindow:
             visible_widgets.append(self.username_label)
             visible_widgets.append(self.password_entry)
             visible_widgets.append(self.password_label)
-            visible_widgets.append(self.epg_label)
-            visible_widgets.append(self.epg_entry)
         else:
             print("Incorrect provider type: ", type_id)
 
