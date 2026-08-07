@@ -122,7 +122,6 @@ class ChannelWidget(Gtk.ListBoxRow):
             if now_playing and "title" in now_playing:
                 title = now_playing["title"]
                 self.epg_label.set_text(title)
-                self.epg_label.set_tooltip_text(title)
                 self.epg_label.show()
                 self.name_label.hide()
                 return
