@@ -1660,6 +1660,9 @@ class MainWindow:
                             self.manager.load_channels(provider)
                             if provider.name == self.settings.get_string("active-provider"):
                                 self.active_provider = provider
+                                if provider.epg:
+                                    self.status(_("Loading EPG..."), provider)
+                                    self.manager.load_epg(provider, refresh=refresh)
                             self.status(None)
                             print("%s: %d channels, %d groups, %d series, %d movies" % (provider.name, \
                                 len(provider.channels), len(provider.groups), len(provider.series), len(provider.movies)))
@@ -1705,6 +1708,9 @@ class MainWindow:
                         # If no errors, approve provider
                         if provider.name == self.settings.get_string("active-provider"):
                             self.active_provider = provider
+                            if provider.epg:
+                                self.status(_("Loading EPG..."), provider)
+                                self.manager.load_epg(provider, refresh=refresh)
                         self.status(None)
                     else:
                         print("XTREAM Authentication Failed")
@@ -1717,6 +1723,9 @@ class MainWindow:
         # If there are more than 1 providers and no Active Provider, set to the first one
         if len(self.providers) > 0 and self.active_provider is None:
             self.active_provider = self.providers[0]
+            if self.active_provider.epg and not hasattr(self.active_provider, "epg_manager"):
+                self.status(_("Loading EPG..."), self.active_provider)
+                self.manager.load_epg(self.active_provider, refresh=refresh)
 
         self.refresh_providers_page()
 
