@@ -227,6 +227,26 @@ class EPGManager:
             print(f"[EPG] Download failed for {epg_url}: {e}")
             return False
 
+    def dump_matches_xml(self, provider):
+        """Dumps channel matching results to an XML file in the EPG cache folder."""
+        root = ET.Element("epg_matches", provider=provider.name)
+
+        for ch in provider.channels:
+            elem = ET.SubElement(root, "channel")
+            elem.attrib["name"] = ch.name or ""
+            elem.attrib["tvg_id"] = ch.tvg_id or ""
+            elem.attrib["tvg_name"] = ch.tvg_name or ""
+            elem.attrib["title"] = ch.title or ""
+            elem.attrib["xmltv_id"] = ch.xmltv_id or ""
+            elem.attrib["matched"] = "true" if ch.xmltv_id else "false"
+
+        tree = ET.ElementTree(root)
+        ET.indent(tree, space="  ")
+
+        dump_file = os.path.join(EPG_PATH, f"{slugify(provider.name)}_matches.xml")
+        tree.write(dump_file, encoding="utf-8", xml_declaration=True)
+        print(f"[EPG] Debug match XML dumped to: {dump_file}")
+
     def load_epg_for_provider(self, provider, refresh: bool = False):
         """Fetches, loads, and matches EPG channels to provider.channels."""
         if not provider.epg:
@@ -258,6 +278,9 @@ class EPGManager:
                 matched_count += 1
 
         print(f"[EPG] Matched {matched_count}/{len(provider.channels)} channels for provider '{provider.name}'")
+
+        # Dump debug report
+        self.dump_matches_xml(provider)
 
     def get_current_and_next(self, xmltv_id: str):
         """Returns (now_playing, next_up) dicts for a channel at the current time."""
