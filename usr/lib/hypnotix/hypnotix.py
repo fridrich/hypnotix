@@ -196,8 +196,22 @@ class ChannelWidget(Gtk.ListBoxRow):
                 guide_item.set_sensitive(False)
             else:
                 guide_menu = Gtk.Menu()
+                last_date = None
                 for prog in programmes:
-                    start_str = datetime.datetime.fromtimestamp(prog["start"]).strftime("%H:%M")
+                    prog_dt = datetime.datetime.fromtimestamp(prog["start"])
+                    prog_date = prog_dt.date()
+
+                    # Insert a date separator whenever the day changes
+                    if prog_date != last_date:
+                        if last_date is not None:
+                            guide_menu.append(Gtk.SeparatorMenuItem())
+                        date_str = prog_dt.strftime("%A, %d %b %Y")
+                        date_header = Gtk.MenuItem(label=f"--- {date_str} ---")
+                        date_header.set_sensitive(False)
+                        guide_menu.append(date_header)
+                        last_date = prog_date
+
+                    start_str = prog_dt.strftime("%H:%M")
                     stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
                     title = prog.get("title", "")
 
