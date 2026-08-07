@@ -31,46 +31,108 @@ def parse_xmltv_time(s: str) -> int:
         return 0
 
 
+import re
+
 class IPTVSimpleMatcher:
-    """Implements Kodi pvr.iptvsimple's 3-pass channel matching algorithm."""
+    """
+    Implements Kodi pvr.iptvsimple's channel-to-XMLTV matching algorithm,
+    with an added fallback pass to strip technical quality descriptors.
+    """
+
+    # Regex for common technical noise, quality tags, and codecs
+    TECH_TAGS_REGEX = re.compile(
+        r'\b(hd|sd|fhd|uhd|qhd|4k|8k|1080p|1080i|720p|576i|hevc|h264|h265|hdr|60fps|fps60)\b',
+        re.IGNORECASE
+    )
 
     def __init__(self, xmltv_channels):
         self.xml_by_id = {}
         self.xml_by_display_name = {}
-        self.xml_by_underscore_name = {}
 
         for ch in xmltv_channels:
-            cid = ch["id"]
-            self.xml_by_id[cid.lower()] = cid
+            cid = ch.get("id")
+            if not cid or not cid.strip():
+                continue
+
+            cid_clean = cid.strip()
+            cid_lower = cid_clean.lower()
+
+            self.xml_by_id[cid_lower] = cid_clean
 
             for name in ch.get("display_names", []):
-                clean_name = name.strip().lower()
-                self.xml_by_display_name[clean_name] = cid
-                self.xml_by_underscore_name[clean_name.replace(" ", "_")] = cid
+                if name and name.strip():
+                    name_lower = name.strip().lower()
+                    if name_lower not in self.xml_by_display_name:
+                        self.xml_by_display_name[name_lower] = cid_clean
 
-    def match_channel(self, tvg_id: str, tvg_name: str, m3u_title: str) -> str:
-        # Pass 1: tvg-id == XMLTV id
-        if tvg_id:
-            tid = tvg_id.strip().lower()
-            if tid in self.xml_by_id:
-                return self.xml_by_id[tid]
+                    # Index stripped version of XMLTV display names
+                    clean_name = self._strip_tech_info(name_lower)
+                    if clean_name and clean_name not in self.xml_by_display_name:
+                        self.xml_by_display_name[clean_name] = cid_clean
 
-        # Pass 2: tvg-name == XMLTV display-name (or space-to-_)
-        if tvg_name:
-            tname = tvg_name.strip().lower()
-            if tname in self.xml_by_display_name:
-                return self.xml_by_display_name[tname]
-            if tname in self.xml_by_underscore_name:
-                return self.xml_by_underscore_name[tname]
+    @classmethod
+    def _strip_tech_info(cls, text: str) -> str:
+        """Removes technical tags (HD, FHD, 1080p, etc.) and clean residual punctuation."""
+        if not text:
+            return ""
+        # Strip tech terms
+        clean = cls.TECH_TAGS_REGEX.sub('', text)
+        # Clean up empty brackets, pipes, or leftover punctuation
+        clean = re.sub(r'[\(\[\{\|\}\]\)]', ' ', clean)
+        # Normalize whitespace
+        return ' '.join(clean.split())
 
-        # Pass 3: M3U stream title == XMLTV display-name
-        if m3u_title:
-            title = m3u_title.strip().lower()
-            if title in self.xml_by_display_name:
-                return self.xml_by_display_name[title]
+    def _match_candidate(self, candidate: str) -> str:
+        if not candidate:
+            return None
+
+        clean = candidate.strip().lower()
+        if not clean:
+            return None
+
+        # 1. Exact match against XMLTV channel ID
+        if clean in self.xml_by_id:
+            return self.xml_by_id[clean]
+
+        # 2. Exact match against XMLTV display-name
+        if clean in self.xml_by_display_name:
+            return self.xml_by_display_name[clean]
+
+        # 3. Match spaces converted to underscores ("bbc one" -> "bbc_one")
+        space_to_underscore = clean.replace(" ", "_")
+        if space_to_underscore in self.xml_by_display_name:
+            return self.xml_by_display_name[space_to_underscore]
+
+        # 4. Match underscores converted to spaces ("bbc_one" -> "bbc one")
+        underscore_to_space = clean.replace("_", " ")
+        if underscore_to_space in self.xml_by_display_name:
+            return self.xml_by_display_name[underscore_to_space]
+
+        # 5. Technical-stripped fallback pass ("BBC One HD [1080p]" -> "bbc one")
+        stripped = self._strip_tech_info(clean)
+        if stripped and stripped != clean:
+            if stripped in self.xml_by_display_name:
+                return self.xml_by_display_name[stripped]
+
+            stripped_underscore = stripped.replace(" ", "_")
+            if stripped_underscore in self.xml_by_display_name:
+                return self.xml_by_display_name[stripped_underscore]
 
         return None
 
+    def match_channel(self, tvg_id: str, tvg_name: str, m3u_title: str) -> str:
+        # Pass 1: tvg-id
+        match = self._match_candidate(tvg_id)
+        if match:
+            return match
+
+        # Pass 2: tvg-name
+        match = self._match_candidate(tvg_name)
+        if match:
+            return match
+
+        # Pass 3: M3U channel stream title
+        return self._match_candidate(m3u_title)
 
 class XMLTVParser:
     """Stream-parses XMLTV data without loading the entire DOM into RAM."""
