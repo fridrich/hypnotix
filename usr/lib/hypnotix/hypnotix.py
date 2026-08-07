@@ -90,9 +90,10 @@ class ChannelWidget(Gtk.ListBoxRow):
         self.set_tooltip_text(channel.name)
 
         frame = Gtk.Frame()
-        label = Gtk.Label(channel.name)
-        label.set_max_width_chars(30)
-        label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.name_label = Gtk.Label(channel.name)
+        self.name_label.set_max_width_chars(30)
+        self.name_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.name_label.set_no_show_all(True)
 
         self.epg_label = Gtk.Label()
         self.epg_label.set_max_width_chars(30)
@@ -100,13 +101,16 @@ class ChannelWidget(Gtk.ListBoxRow):
         self.epg_label.get_style_context().add_class("dim-label")
         self.epg_label.set_no_show_all(True)
 
+        logo.set_halign(Gtk.Align.FILL)
+
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, border_width=6)
-        box.pack_start(logo, False, False, 0)
-        box.pack_start(label, False, False, 0)
+        box.pack_start(logo, True, True, 0)
+        box.pack_start(self.name_label, False, False, 0)
         box.pack_start(self.epg_label, False, False, 0)
         box.set_spacing(6)
         frame.add(box)
         self.add(frame)
+        self.name_label.show()
 
     @property
     def channel(self):
@@ -116,10 +120,14 @@ class ChannelWidget(Gtk.ListBoxRow):
         if epg_manager and getattr(self._channel, "xmltv_id", None):
             now_playing, _ = epg_manager.get_current_and_next(self._channel.xmltv_id)
             if now_playing and "title" in now_playing:
-                self.epg_label.set_text(now_playing["title"])
+                title = now_playing["title"]
+                self.epg_label.set_text(title)
+                self.epg_label.set_tooltip_text(title)
                 self.epg_label.show()
+                self.name_label.hide()
                 return
         self.epg_label.hide()
+        self.name_label.show()
 
 class MyApplication(Gtk.Application):
     # Main initialization routine
