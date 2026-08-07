@@ -1,6 +1,8 @@
 import datetime
 import gzip
+import json
 import os
+import sqlite3
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -238,12 +240,24 @@ class EPGManager:
         ext = ".xml.gz" if epg_src.endswith(".gz") else ".xml"
         return os.path.join(EPG_PATH, f"{slugify(provider.name)}{ext}")
 
+    def get_db_path(self, local_path: str) -> str:
+        """Returns the SQLite database cache path corresponding to the XML file."""
+        return local_path + ".db"
+
     def is_cache_valid(self, local_path: str, ttl_hours: int = 24) -> bool:
         """Checks if the local cache file exists and is newer than TTL."""
         if not local_path or not os.path.exists(local_path):
             return False
         mtime = os.path.getmtime(local_path)
         return (time.time() - mtime) < (ttl_hours * 3600)
+
+    def is_db_valid(self, db_path: str, xml_path: str) -> bool:
+        """Checks if the SQLite database exists and is newer than the XMLTV file."""
+        if not db_path or not os.path.exists(db_path):
+            return False
+        if not os.path.exists(xml_path):
+            return False
+        return os.path.getmtime(db_path) >= os.path.getmtime(xml_path)
 
     def download_epg(self, epg_url: str, local_path: str) -> bool:
         """Downloads a remote EPG XML file to the local cache path."""
@@ -255,6 +269,83 @@ class EPGManager:
         except Exception as e:
             print(f"[EPG] Download failed for {epg_url}: {e}")
             return False
+
+    def save_to_db(self, db_path: str, channels: list, programmes: dict):
+        """Caches parsed XMLTV channels and programmes into SQLite."""
+        try:
+            print(f"[EPG] Saving EPG cache to SQLite database: {db_path}")
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS channels")
+            cursor.execute("DROP TABLE IF EXISTS programmes")
+            cursor.execute("""
+                CREATE TABLE channels (
+                    id TEXT PRIMARY KEY,
+                    display_names TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE programmes (
+                    channel_id TEXT,
+                    start INTEGER,
+                    stop INTEGER,
+                    title TEXT,
+                    desc TEXT
+                )
+            """)
+
+            ch_rows = [(ch["id"], json.dumps(ch["display_names"])) for ch in channels]
+            cursor.executemany("INSERT OR REPLACE INTO channels VALUES (?, ?)", ch_rows)
+
+            prog_rows = []
+            for cid, progs in programmes.items():
+                for p in progs:
+                    prog_rows.append((cid, p["start"], p["stop"], p["title"], p["desc"]))
+            cursor.executemany("INSERT INTO programmes VALUES (?, ?, ?, ?, ?)", prog_rows)
+
+            cursor.execute("CREATE INDEX idx_programmes_channel ON programmes(channel_id)")
+            cursor.execute("CREATE INDEX idx_programmes_stop ON programmes(stop)")
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[EPG] Failed to save SQLite cache ({db_path}): {e}")
+
+    def load_channels_from_db(self, db_path: str) -> list:
+        """Loads channel definitions from SQLite database."""
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, display_names FROM channels")
+        channels = []
+        for cid, names_json in cursor.fetchall():
+            try:
+                names = json.loads(names_json)
+            except Exception:
+                names = []
+            channels.append({"id": cid, "display_names": names})
+        conn.close()
+        return channels
+
+    def load_programmes_from_db(self, db_path: str, valid_xmltv_ids: set = None) -> dict:
+        """Loads non-expired EPG programmes from SQLite database."""
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        now = int(time.time())
+        cursor.execute("SELECT channel_id, start, stop, title, desc FROM programmes WHERE stop > ?", (now,))
+
+        programmes = {}
+        for cid, start, stop, title, desc in cursor.fetchall():
+            if valid_xmltv_ids is not None and cid not in valid_xmltv_ids:
+                continue
+            if cid not in programmes:
+                programmes[cid] = []
+            programmes[cid].append({
+                "start": start,
+                "stop": stop,
+                "title": title,
+                "desc": desc
+            })
+        conn.close()
+        return programmes
 
     def dump_matches_xml(self, provider):
         """Dumps channel matching results to an XML file in the EPG cache folder."""
@@ -295,9 +386,16 @@ class EPGManager:
             print(f"[EPG] File not found: {local_path}")
             return
 
-        # Step 1: Parse channels first
-        print(f"[EPG] Parsing EPG channels: {local_path}")
-        xml_channels = XMLTVParser.parse_channels(local_path)
+        db_path = self.get_db_path(local_path)
+        use_db = (not refresh) and self.is_db_valid(db_path, local_path)
+
+        # Step 1: Get channels (from SQLite if valid, otherwise XML)
+        if use_db:
+            print(f"[EPG] Loading EPG channels from SQLite cache: {db_path}")
+            xml_channels = self.load_channels_from_db(db_path)
+        else:
+            print(f"[EPG] Parsing EPG channels from XML: {local_path}")
+            xml_channels = XMLTVParser.parse_channels(local_path)
 
         # Step 2: Match M3U channels with XMLTV channels
         matcher = IPTVSimpleMatcher(xml_channels)
@@ -312,9 +410,15 @@ class EPGManager:
         # Step 3: Build the filter set of active XMLTV IDs
         valid_xmltv_ids = {ch.xmltv_id for ch in provider.channels if ch.xmltv_id}
 
-        # Step 4: Parse programmes only for matched channels and prune past broadcasts
-        print(f"[EPG] Parsing EPG programmes for {len(valid_xmltv_ids)} matched channels...")
-        self.programmes = XMLTVParser.parse_programmes(local_path, valid_xmltv_ids=valid_xmltv_ids)
+        # Step 4: Load programmes from SQLite or parse from XML and build SQLite cache
+        if use_db:
+            print(f"[EPG] Loading EPG programmes from SQLite cache for {len(valid_xmltv_ids)} matched channels...")
+            self.programmes = self.load_programmes_from_db(db_path, valid_xmltv_ids=valid_xmltv_ids)
+        else:
+            print(f"[EPG] Parsing full EPG programmes from XML to build database cache...")
+            all_programmes = XMLTVParser.parse_programmes(local_path, valid_xmltv_ids=None)
+            self.save_to_db(db_path, xml_channels, all_programmes)
+            self.programmes = {cid: progs for cid, progs in all_programmes.items() if cid in valid_xmltv_ids}
 
         # Dump debug report
         self.dump_matches_xml(provider)
