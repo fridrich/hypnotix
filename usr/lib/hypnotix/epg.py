@@ -144,10 +144,9 @@ class XMLTVParser:
         return open(file_path, "rb")
 
     @classmethod
-    def parse_guide(cls, file_path: str):
+    def parse_channels(cls, file_path: str):
+        """Pass 1: Parses only <channel> elements to enable early matching."""
         channels = []
-        programmes = {}  # { xmltv_id: [ {"start": ts, "stop": ts, "title": "...", "desc": "..."}, ... ] }
-
         try:
             with cls._open_source(file_path) as f:
                 for event, elem in ET.iterparse(f, events=("end",)):
@@ -158,11 +157,41 @@ class XMLTVParser:
                             names = [e.text for e in elem.findall("display-name") if e.text]
                             channels.append({"id": cid, "display_names": names})
                         elem.clear()
-
                     elif elem.tag == "programme":
+                        elem.clear()
+        except Exception as e:
+            print(f"[EPG] Parse channels error ({file_path}): {e}")
+
+        return channels
+
+    @classmethod
+    def parse_programmes(cls, file_path: str, valid_xmltv_ids: set = None):
+        """Pass 2: Parses <programme> elements, pruning past shows and unmatched channels."""
+        programmes = {}
+        now = int(time.time())
+
+        try:
+            with cls._open_source(file_path) as f:
+                for event, elem in ET.iterparse(f, events=("end",)):
+                    if elem.tag == "programme":
                         cid = elem.attrib.get("channel")
-                        start = parse_xmltv_time(elem.attrib.get("start"))
+                        if not cid:
+                            elem.clear()
+                            continue
+
+                        cid = cid.strip()
+                        # Optimization: Ignore <programme> entries not matched to provider.channels
+                        if valid_xmltv_ids is not None and cid not in valid_xmltv_ids:
+                            elem.clear()
+                            continue
+
                         stop = parse_xmltv_time(elem.attrib.get("stop"))
+                        # Optimization: Prune programmes where stop time is in the past
+                        if stop <= now:
+                            elem.clear()
+                            continue
+
+                        start = parse_xmltv_time(elem.attrib.get("start"))
 
                         title_elem = elem.find("title")
                         title = title_elem.text if title_elem is not None else ""
@@ -170,8 +199,7 @@ class XMLTVParser:
                         desc_elem = elem.find("desc")
                         desc = desc_elem.text if desc_elem is not None else ""
 
-                        if cid and start and stop and title:
-                            cid = cid.strip()
+                        if start and title:
                             if cid not in programmes:
                                 programmes[cid] = []
                             programmes[cid].append({
@@ -181,11 +209,12 @@ class XMLTVParser:
                                 "desc": desc
                             })
                         elem.clear()
+                    elif elem.tag == "channel":
+                        elem.clear()
         except Exception as e:
-            print(f"[EPG] Parse error ({file_path}): {e}")
+            print(f"[EPG] Parse programmes error ({file_path}): {e}")
 
-        return channels, programmes
-
+        return programmes
 
 class EPGManager:
     """Handles fetching, caching, matching, and querying EPG data."""
@@ -266,10 +295,11 @@ class EPGManager:
             print(f"[EPG] File not found: {local_path}")
             return
 
-        print(f"[EPG] Parsing EPG file: {local_path}")
-        xml_channels, self.programmes = XMLTVParser.parse_guide(local_path)
+        # Step 1: Parse channels first
+        print(f"[EPG] Parsing EPG channels: {local_path}")
+        xml_channels = XMLTVParser.parse_channels(local_path)
 
-        # Match M3U channels with XMLTV channels
+        # Step 2: Match M3U channels with XMLTV channels
         matcher = IPTVSimpleMatcher(xml_channels)
         matched_count = 0
         for channel in provider.channels:
@@ -278,6 +308,13 @@ class EPGManager:
                 matched_count += 1
 
         print(f"[EPG] Matched {matched_count}/{len(provider.channels)} channels for provider '{provider.name}'")
+
+        # Step 3: Build the filter set of active XMLTV IDs
+        valid_xmltv_ids = {ch.xmltv_id for ch in provider.channels if ch.xmltv_id}
+
+        # Step 4: Parse programmes only for matched channels and prune past broadcasts
+        print(f"[EPG] Parsing EPG programmes for {len(valid_xmltv_ids)} matched channels...")
+        self.programmes = XMLTVParser.parse_programmes(local_path, valid_xmltv_ids=valid_xmltv_ids)
 
         # Dump debug report
         self.dump_matches_xml(provider)
