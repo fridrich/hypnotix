@@ -14,6 +14,7 @@ EXTINF = re.compile(r'^#EXTINF:(?P<duration>-?\d+?) ?(?P<params>.*),(?P<title>.*
 SERIES = re.compile(r"(?P<series>.*?) S(?P<season>.\d{1,2}).*E(?P<episode>.\d{1,2}.*)$", re.IGNORECASE)
 
 PROVIDERS_PATH = os.path.join(GLib.get_user_cache_dir(), "hypnotix", "providers")
+EPG_PATH = os.path.join(GLib.get_user_cache_dir(), "hypnotix", "epg")
 
 TV_GROUP, MOVIES_GROUP, SERIES_GROUP = range(3)
 
@@ -106,19 +107,27 @@ class Channel:
         self.group_title = None
         self.title = None
         self.url = None
+        self.tvg_id = None
+        self.tvg_name = None
+        self.xmltv_id = None
         match = EXTINF.fullmatch(info)
         if match is not None:
             res = match.groupdict()
             if 'params' in res:
                 params = dict(PARAMS.findall(res['params']))
+                if "tvg-id" in params and params['tvg-id'].strip() != "":
+                    self.tvg_id = params['tvg-id'].strip()
                 if "tvg-name" in params and params['tvg-name'].strip() != "":
                     self.name = params['tvg-name'].strip()
+                    self.tvg_name = self.name
                 if "tvg-logo" in params and params['tvg-logo'].strip() != "":
                     self.logo = params['tvg-logo'].strip()
                 if "group-title" in params and params['group-title'].strip() != "":
                     self.group_title = params['group-title'].strip().replace(";", " ").replace("  ", " ")
             if 'title' in res:
-                self.title = res['title']
+                self.title = res['title'].strip()
+        if self.title is None and "," in info:
+            self.title = info.split(",")[-1].strip()
         if self.name is None and "," in info:
             self.name = info.split(",")[-1].strip()
         if self.logo is not None:
@@ -142,6 +151,7 @@ class Channel:
 class Manager:
     def __init__(self, settings):
         os.system("mkdir -p '%s'" % PROVIDERS_PATH)
+        os.system("mkdir -p '%s'" % EPG_PATH)
         self.verbose = False
         self.settings = settings
 
@@ -300,6 +310,13 @@ class Manager:
                             provider.movies.append(channel)
                     else:
                         provider.channels.append(channel)
+
+    def load_epg(self, provider, refresh=False):
+        if getattr(provider, "epg", None):
+            from epg import EPGManager
+            epg_mgr = EPGManager(user_agent=self.settings.get_string("user-agent"))
+            epg_mgr.load_epg_for_provider(provider, refresh=refresh)
+            provider.epg_manager = epg_mgr
 
     def load_favorites(self):
         favorites = []
