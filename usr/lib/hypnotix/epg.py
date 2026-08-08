@@ -5,7 +5,9 @@ import os
 import sqlite3
 import time
 import urllib.request
+import urllib.error
 import xml.etree.ElementTree as ET
+from email.utils import formatdate
 
 from common import EPG_PATH, async_function, slugify
 
@@ -268,9 +270,18 @@ class EPGManager:
         """Downloads a remote EPG XML file to the local cache path."""
         try:
             req = urllib.request.Request(epg_url, headers={"User-Agent": self.user_agent})
+            if os.path.exists(local_path):
+                mtime = os.path.getmtime(local_path)
+                req.add_header("If-Modified-Since", formatdate(mtime, usegmt=True))
             with urllib.request.urlopen(req, timeout=30) as resp, open(local_path, "wb") as out:
                 out.write(resp.read())
             return True
+        except urllib.error.HTTPError as e:
+            if e.code == 304:
+                print(f"[EPG] Not modified (304), using cached EPG for {epg_url}")
+                return True
+            print(f"[EPG] Download failed for {epg_url}: {e}")
+            return False
         except Exception as e:
             print(f"[EPG] Download failed for {epg_url}: {e}")
             return False

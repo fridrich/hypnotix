@@ -2,6 +2,7 @@
 import os
 import re
 import threading
+from email.utils import formatdate
 
 import requests
 from gi.repository import GLib, GObject
@@ -177,11 +178,19 @@ class Manager:
                     'User-Agent': self.settings.get_string("user-agent"),
                     'Referer': self.settings.get_string("http-referer")
                 }
+
+                if os.path.exists(provider.path):
+                    mtime = os.path.getmtime(provider.path)
+                    headers['If-Modified-Since'] = formatdate(mtime, usegmt=True)
+
                 try:
                     response = requests.get(provider.url, headers=headers, timeout=(5, 120), stream=True)
 
                     # If there is an answer from the remote server
-                    if response.status_code == 200:
+                    if response.status_code == 304:
+                        print("HTTP 304 Not Modified: Using cached playlist.")
+                        ret_code = True
+                    elif response.status_code == 200:
                         # Set downloaded size
                         downloaded_bytes = 0
                         # Get total playlist byte size
