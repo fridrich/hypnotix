@@ -139,8 +139,9 @@ class ChannelWidget(Gtk.ListBoxRow):
             menu = Gtk.Menu()
 
             epg_mgr = None
-            if self.main_window and self.main_window.active_provider:
-                epg_mgr = getattr(self.main_window.active_provider, "epg_manager", None)
+            provider = getattr(self._channel, "provider", None) or (self.main_window.active_provider if self.main_window else None)
+            if provider:
+                epg_mgr = getattr(provider, "epg_manager", None)
 
             xmltv_id = getattr(self._channel, "xmltv_id", None)
 
@@ -663,9 +664,9 @@ class MainWindow:
     def show_favorites(self, widget=None):
         self.content_type = TV_GROUP
         channels = []
-        epg_urls = []
 
         fav_provider = Provider("Favorites", None)
+        providers_to_load = []
 
         for line in self.favorite_data:
             line = line.strip()
@@ -673,21 +674,25 @@ class MainWindow:
                 continue
             parts = line.split(":::")
             info, url = parts[0], parts[1]
-            
-            channel = Channel(fav_provider, info) 
+
+            channel = Channel(fav_provider, info)
             channel.url = url
+            channel.provider = fav_provider
             if len(parts) > 3:
                 channel.xmltv_id = parts[3]
             if len(parts) > 2 and parts[2]:
-                epg_urls.append(parts[2])
+                epg_url = parts[2]
+                for p in self.providers:
+                    if getattr(p, "epg", None) == epg_url:
+                        channel.provider = p
+                        if p not in providers_to_load and not hasattr(p, "epg_manager"):
+                            providers_to_load.append(p)
+                        break
             channels.append(channel)
 
-        if epg_urls:
-            epg_urls = list(dict.fromkeys(epg_urls))
-            fav_provider.epg = " ".join(epg_urls)
-            fav_provider.channels = channels
-            self.manager.load_epg(fav_provider)
-            
+        for p in providers_to_load:
+            self.manager.load_epg(p)
+
         self.show_channels(channels, favorites=True)
 
     def show_channels(self, channels, favorites=False):
@@ -713,12 +718,13 @@ class MainWindow:
 
     @idle_function
     def update_epg_labels(self):
-        if not self.active_provider or not getattr(self.active_provider, "epg_manager", None):
-            return True
-        epg_mgr = self.active_provider.epg_manager
         for widget in self.channels_listbox.get_children():
             if isinstance(widget, ChannelWidget):
-                widget.update_epg(epg_mgr)
+                provider = getattr(widget.channel, "provider", None) or getattr(self, "active_provider", None)
+                if provider and getattr(provider, "epg_manager", None):
+                    widget.update_epg(provider.epg_manager)
+                else:
+                    widget.update_epg(None)
         return True
 
     def show_channel_epg_info(self, channel):
@@ -731,7 +737,8 @@ class MainWindow:
         box.set_spacing(12)
         box.set_border_width(12)
 
-        epg_mgr = getattr(self.active_provider, "epg_manager", None) if self.active_provider else None
+        provider = getattr(channel, "provider", None) or getattr(self, "active_provider", None)
+        epg_mgr = getattr(provider, "epg_manager", None) if provider else None
         now_playing, next_up = (None, None)
         if epg_mgr and getattr(channel, "xmltv_id", None):
             now_playing, next_up = epg_mgr.get_current_and_next(channel.xmltv_id)
@@ -1083,13 +1090,22 @@ class MainWindow:
         if self.page_is_loading:
             return
         name = self.active_channel.name
-        data = f"{self.active_channel.info}:::{self.active_channel.url}"
-        if widget.get_active() and data not in self.favorite_data:
+
+        data_prefix = f"{self.active_channel.info}:::{self.active_channel.url}"
+        existing_match = next((fav for fav in self.favorite_data if fav == data_prefix or fav.startswith(data_prefix + ":::")), None)
+
+        if widget.get_active() and not existing_match:
             print (f"Adding {name} to favorites")
+            epg_url = ""
+            xmltv_id = getattr(self.active_channel, "xmltv_id", "")
+            provider = getattr(self.active_channel, "provider", None) or getattr(self, "active_provider", None)
+            if provider and getattr(provider, "epg", None):
+                epg_url = provider.epg
+            data = f"{data_prefix}:::{epg_url}:::{xmltv_id}"
             self.favorite_data.append(data)
-        elif widget.get_active() == False and data in self.favorite_data:
+        elif widget.get_active() == False and existing_match:
             print (f"Removing {name} from favorites")
-            self.favorite_data.remove(data)
+            self.favorite_data.remove(existing_match)
         self.favorite_button_image.set_from_icon_name("xsi-starred-symbolic" if widget.get_active() else "non-xsi-starred-symbolic", Gtk.IconSize.BUTTON)
         self.manager.save_favorites(self.favorite_data)
 
@@ -1719,10 +1735,11 @@ class MainWindow:
                 self.osd_epg_visible_until = 0
             else:
                 # If it's hidden, fetch the info and toggle it on
-                if self.active_channel and self.active_provider and getattr(self.active_provider, "epg_manager", None):
+                provider = getattr(self.active_channel, "provider", None) or getattr(self, "active_provider", None)
+                if provider and getattr(provider, "epg_manager", None):
                     xmltv_id = getattr(self.active_channel, "xmltv_id", None)
                     if xmltv_id:
-                        now_playing, _ = self.active_provider.epg_manager.get_current_and_next(xmltv_id)
+                        now_playing, _ = provider.epg_manager.get_current_and_next(xmltv_id)
                         if now_playing:
                             start_str = datetime.datetime.fromtimestamp(now_playing["start"]).strftime("%H:%M")
                             stop_str = datetime.datetime.fromtimestamp(now_playing["stop"]).strftime("%H:%M")
