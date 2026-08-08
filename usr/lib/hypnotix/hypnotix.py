@@ -734,10 +734,16 @@ class MainWindow:
                         break
             channels.append(channel)
 
-        for p in providers_to_load:
-            self.manager.load_epg(p)
+        if providers_to_load:
+            self.load_epgs_async(providers_to_load)
 
         self.show_channels(channels, favorites=True)
+
+    @async_function
+    def load_epgs_async(self, providers):
+        for p in providers:
+            self.manager.load_epg(p)
+        GLib.idle_add(self.update_epg_labels)
 
     def show_channels(self, channels, favorites=False):
         self.navigate_to("channels_page", "", favorites)
