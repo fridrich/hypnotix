@@ -59,7 +59,8 @@ class IPTVSimpleMatcher:
             cid_clean = cid.strip()
             cid_lower = cid_clean.lower()
 
-            self.xml_by_id[cid_lower] = cid_clean
+            if cid_lower not in self.xml_by_id:
+                self.xml_by_id[cid_lower] = cid_clean
 
             for name in ch.get("display_names", []):
                 if name and name.strip():
