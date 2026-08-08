@@ -1166,6 +1166,7 @@ class MainWindow:
             try:
                 if self.mpv is not None:
                     self.mpv.show_osd_text("", 1)
+                    self.osd_epg_visible_until = 0
                     self.mpv.stop()
                     self.mpv.pause = False
             except Exception:
@@ -1814,6 +1815,26 @@ class MainWindow:
         modifier = event.get_state() & persistant_modifiers
         # Bool of Control modifier state
         ctrl = modifier == Gdk.ModifierType.CONTROL_MASK
+
+        if event.keyval == Gdk.KEY_g and not isinstance(widget.get_focus(), Gtk.Entry):
+            # If the EPG is currently showing, toggle it off
+            if getattr(self, "osd_epg_visible_until", 0) > time.time():
+                self.mpv.show_osd_text("", 1)
+                self.osd_epg_visible_until = 0
+            else:
+                # If it's hidden, fetch the info and toggle it on
+                if self.active_channel and self.active_provider and getattr(self.active_provider, "epg_manager", None):
+                    xmltv_id = getattr(self.active_channel, "xmltv_id", None)
+                    if xmltv_id:
+                        now_playing, _ = self.active_provider.epg_manager.get_current_and_next(xmltv_id)
+                        if now_playing:
+                            start_str = datetime.datetime.fromtimestamp(now_playing["start"]).strftime("%H:%M")
+                            stop_str = datetime.datetime.fromtimestamp(now_playing["stop"]).strftime("%H:%M")
+                            title = now_playing.get("title", "")
+                            osd_text = f"{self.active_channel.name}\n{title}\n{start_str} - {stop_str}"
+                            self.mpv.show_osd_text(osd_text, 6000)
+                            self.osd_epg_visible_until = time.time() + 6
+            return True
 
         if ctrl and event.keyval == Gdk.KEY_r:
             self.reload(page=None, refresh=True)
