@@ -663,11 +663,31 @@ class MainWindow:
     def show_favorites(self, widget=None):
         self.content_type = TV_GROUP
         channels = []
+        epg_urls = []
+
+        fav_provider = Provider("Favorites", None)
+
         for line in self.favorite_data:
-            info, url = line.split(":::")
-            channel = Channel(None, info)
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(":::")
+            info, url = parts[0], parts[1]
+            
+            channel = Channel(fav_provider, info) 
             channel.url = url
+            if len(parts) > 3:
+                channel.xmltv_id = parts[3]
+            if len(parts) > 2 and parts[2]:
+                epg_urls.append(parts[2])
             channels.append(channel)
+
+        if epg_urls:
+            epg_urls = list(dict.fromkeys(epg_urls))
+            fav_provider.epg = " ".join(epg_urls)
+            fav_provider.channels = channels
+            self.manager.load_epg(fav_provider)
+            
         self.show_channels(channels, favorites=True)
 
     def show_channels(self, channels, favorites=False):
