@@ -255,9 +255,13 @@ class EPGManager:
         """Checks if the SQLite database exists and is newer than the XMLTV file."""
         if not db_path or not os.path.exists(db_path):
             return False
-        if not os.path.exists(xml_path):
-            return False
-        return os.path.getmtime(db_path) >= os.path.getmtime(xml_path)
+        if isinstance(xml_path, list):
+            for xp in xml_path:
+                if not os.path.exists(xp) or os.path.getmtime(db_path) < os.path.getmtime(xp):
+                    return False
+            return True
+        else:
+            return os.path.exists(xml_path) and os.path.getmtime(db_path) >= os.path.getmtime(xml_path)
 
     def download_epg(self, epg_url: str, local_path: str) -> bool:
         """Downloads a remote EPG XML file to the local cache path."""
@@ -372,30 +376,37 @@ class EPGManager:
         if not provider.epg:
             return
 
-        local_path = self.resolve_epg_path(provider)
-        if not local_path:
+        epg_urls = [u.strip() for u in provider.epg.replace(',', ' ').split() if u.strip()]
+        if not epg_urls:
             return
 
-        # Download if URL and cache is missing/expired
-        if provider.epg.startswith("http://") or provider.epg.startswith("https://"):
-            if refresh or not self.is_cache_valid(local_path):
-                print(f"[EPG] Downloading EPG for provider '{provider.name}'...")
-                self.download_epg(provider.epg, local_path)
+        db_path = os.path.join(EPG_PATH, f"{slugify(provider.name)}.db")
+        xml_paths = []
 
-        if not os.path.exists(local_path):
-            print(f"[EPG] File not found: {local_path}")
-            return
+        for i, epg_url in enumerate(epg_urls):
+            local_path = os.path.join(EPG_PATH, f"{slugify(provider.name)}_{i}.xml.gz" if epg_url.endswith(".gz") else f"{slugify(provider.name)}_{i}.xml")
+            xml_paths.append(local_path)
 
-        db_path = self.get_db_path(local_path)
-        use_db = (not refresh) and self.is_db_valid(db_path, local_path)
+            if epg_url.startswith("http://") or epg_url.startswith("https://"):
+                if refresh or not self.is_cache_valid(local_path):
+                    print(f"[EPG] Downloading EPG {i+1}/{len(epg_urls)} for provider '{provider.name}'...")
+                    self.download_epg(epg_url, local_path)
+            elif epg_url.startswith("file://") or epg_url.startswith("/"):
+                path = epg_url[7:] if epg_url.startswith("file://") else epg_url
+                xml_paths[-1] = os.path.expanduser(path)
+
+        use_db = (not refresh) and self.is_db_valid(db_path, xml_paths)
 
         # Step 1: Get channels (from SQLite if valid, otherwise XML)
         if use_db:
             print(f"[EPG] Loading EPG channels from SQLite cache: {db_path}")
             xml_channels = self.load_channels_from_db(db_path)
         else:
-            print(f"[EPG] Parsing EPG channels from XML: {local_path}")
-            xml_channels = XMLTVParser.parse_channels(local_path)
+            xml_channels = []
+            for xp in xml_paths:
+                if os.path.exists(xp):
+                    print(f"[EPG] Parsing EPG channels from XML: {xp}")
+                    xml_channels.extend(XMLTVParser.parse_channels(xp))
 
         # Step 2: Match M3U channels with XMLTV channels
         matcher = IPTVSimpleMatcher(xml_channels)
@@ -415,8 +426,15 @@ class EPGManager:
             print(f"[EPG] Loading EPG programmes from SQLite cache for {len(valid_xmltv_ids)} matched channels...")
             self.programmes = self.load_programmes_from_db(db_path, valid_xmltv_ids=valid_xmltv_ids)
         else:
-            print(f"[EPG] Parsing full EPG programmes from XML to build database cache...")
-            all_programmes = XMLTVParser.parse_programmes(local_path, valid_xmltv_ids=None)
+            print(f"[EPG] Parsing full EPG programmes from XML(s) to build database cache...")
+            all_programmes = {}
+            for xp in xml_paths:
+                if os.path.exists(xp):
+                    progs = XMLTVParser.parse_programmes(xp, valid_xmltv_ids=None)
+                    for cid, p_list in progs.items():
+                        if cid not in all_programmes:
+                            all_programmes[cid] = []
+                        all_programmes[cid].extend(p_list)
             self.save_to_db(db_path, xml_channels, all_programmes)
             self.programmes = {cid: progs for cid, progs in all_programmes.items() if cid in valid_xmltv_ids}
 
