@@ -294,7 +294,8 @@ class EPGManager:
                     start INTEGER,
                     stop INTEGER,
                     title TEXT,
-                    desc TEXT
+                    desc TEXT,
+                    UNIQUE(channel_id, start)
                 )
             """)
 
@@ -305,7 +306,7 @@ class EPGManager:
             for cid, progs in programmes.items():
                 for p in progs:
                     prog_rows.append((cid, p["start"], p["stop"], p["title"], p["desc"]))
-            cursor.executemany("INSERT INTO programmes VALUES (?, ?, ?, ?, ?)", prog_rows)
+            cursor.executemany("INSERT OR IGNORE INTO programmes VALUES (?, ?, ?, ?, ?)", prog_rows)
 
             cursor.execute("CREATE INDEX idx_programmes_channel ON programmes(channel_id)")
             cursor.execute("CREATE INDEX idx_programmes_stop ON programmes(stop)")
