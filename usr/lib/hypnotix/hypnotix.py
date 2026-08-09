@@ -714,7 +714,69 @@ class MainWindow:
     def load_epgs_async(self, providers):
         for p in providers:
             self.manager.load_epg(p)
+
+        # Trigger an idle callback to save the newly discovered matches permanently
+        GLib.idle_add(self.save_matched_favorites_idle, providers)
         GLib.idle_add(self.update_epg_labels)
+
+    def save_matched_favorites_idle(self, providers):
+        import re
+        fav_provider = next((p for p in providers if p.name == "Favorites"), None)
+        if not fav_provider:
+            return False
+
+        updated = False
+        new_fav_data = []
+
+        for line in self.favorite_data:
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = line.split(":::")
+            info, url = parts[0], parts[1]
+
+            # Find the corresponding channel to see if the EPG Manager assigned it an xmltv_id
+            matched_channel = next((c for c in fav_provider.channels if c.url == url), None)
+
+            if matched_channel and matched_channel.xmltv_id:
+                # If the tvg-id in the EXTINF string doesn't perfectly match the resolved xmltv_id, rewrite it
+                if f'tvg-id="{matched_channel.xmltv_id}"' not in info:
+
+                    # Update or inject tvg-id
+                    if 'tvg-id="' in info:
+                        info = re.sub(r'tvg-id="[^"]*"', f'tvg-id="{matched_channel.xmltv_id}"', info)
+                    else:
+                        info = info.replace('#EXTINF:-1', f'#EXTINF:-1 tvg-id="{matched_channel.xmltv_id}"', 1)
+
+                    # Update or inject tvg-name as requested
+                    if 'tvg-name="' in info:
+                        info = re.sub(r'tvg-name="[^"]*"', f'tvg-name="{matched_channel.xmltv_id}"', info)
+                    else:
+                        info = info.replace('#EXTINF:-1', f'#EXTINF:-1 tvg-name="{matched_channel.xmltv_id}"', 1)
+
+                    parts[0] = info
+
+                    # Update the explicit list indices for EPG url and XMLTV ID
+                    epg_url = getattr(matched_channel.provider, "epg", "") or ""
+                    if len(parts) == 2:
+                        parts.extend([epg_url, matched_channel.xmltv_id])
+                    elif len(parts) == 3:
+                        parts.append(matched_channel.xmltv_id)
+                    else:
+                        parts[3] = matched_channel.xmltv_id
+
+                    line = ":::".join(parts)
+                    updated = True
+
+            new_fav_data.append(line)
+
+        # Only flush to disk if a new match was injected
+        if updated:
+            self.favorite_data = new_fav_data
+            self.manager.save_favorites(self.favorite_data)
+
+        return False
 
     def show_channels(self, channels, favorites=False):
         self.navigate_to("channels_page", "", favorites)
