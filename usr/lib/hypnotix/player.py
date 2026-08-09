@@ -37,6 +37,10 @@ class VideoPlayer(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def unobserve_property(self, name, callback):
+        pass
+
+    @abc.abstractmethod
     def register_event_cb(self, callback):
         pass
 
@@ -51,6 +55,11 @@ class VideoPlayer(abc.ABC):
     @property
     @abc.abstractmethod
     def pause(self) -> bool:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def idle_active(self) -> bool:
         pass
 
     @pause.setter
@@ -117,6 +126,12 @@ class MpvEngine(VideoPlayer):
     def observe_property(self, name, callback):
         self.player.observe_property(name, callback)
 
+    def unobserve_property(self, name, callback):
+        try:
+            self.player.unobserve_property(name, callback)
+        except Exception:
+            pass
+
     def register_event_cb(self, callback):
         self.player.register_event_cb(callback)
 
@@ -132,6 +147,10 @@ class MpvEngine(VideoPlayer):
     @property
     def pause(self) -> bool:
         return getattr(self.player, "pause", False)
+
+    @property
+    def idle_active(self) -> bool:
+        return getattr(self.player, "idle_active", False)
 
     @pause.setter
     def pause(self, value: bool):
@@ -212,6 +231,9 @@ class VlcEngine(VideoPlayer):
     def observe_property(self, name, callback):
         pass
 
+    def unobserve_property(self, name, callback):
+        pass
+
     def register_event_cb(self, callback):
         pass
 
@@ -263,6 +285,11 @@ class VlcEngine(VideoPlayer):
     @property
     def pause(self) -> bool:
         return self.player.get_rate() == 0.0
+
+    @property
+    def idle_active(self) -> bool:
+        # VLC doesn't use the MPV-style idle property mechanism for its UI logic
+        return False
 
     @pause.setter
     def pause(self, value: bool):
