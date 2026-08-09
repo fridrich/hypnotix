@@ -385,6 +385,7 @@ class MainWindow:
             "referer_entry",
             "mpv_entry",
             "video_backend_combo",
+            "favorites_epg_entry",
             "mpv_link",
             "ytdlp_local_switch",
             "ytdlp_system_version_label",
@@ -476,6 +477,7 @@ class MainWindow:
         self.bind_setting_widget("user-agent", self.useragent_entry)
         self.bind_setting_widget("http-referer", self.referer_entry)
         self.bind_setting_widget("mpv-options", self.mpv_entry)
+        self.bind_setting_widget("favorites-epg", self.favorites_epg_entry)
 
         import player
         self.is_mpv_available = player.mpv is not None
@@ -710,6 +712,7 @@ class MainWindow:
         channels = []
 
         fav_provider = Provider("Favorites", None)
+        fav_provider.epg = self.settings.get_string("favorites-epg").strip()
         providers_to_load = []
 
         for line in self.favorite_data:
@@ -724,15 +727,27 @@ class MainWindow:
             channel.provider = fav_provider
             if len(parts) > 3:
                 channel.xmltv_id = parts[3]
+
+            matched_existing = False
             if len(parts) > 2 and parts[2]:
                 epg_url = parts[2]
                 for p in self.providers:
                     if getattr(p, "epg", None) == epg_url:
                         channel.provider = p
+                        matched_existing = True
                         if p not in providers_to_load and not hasattr(p, "epg_manager"):
                             providers_to_load.append(p)
                         break
+
+            # Add manual/unmatched channels to fav_provider so it can map their EPG
+            if not matched_existing:
+                fav_provider.channels.append(channel)
+
             channels.append(channel)
+
+        # Queue the fav_provider to load its EPG database asynchronously
+        if fav_provider.channels and fav_provider.epg and not hasattr(fav_provider, "epg_manager"):
+            providers_to_load.append(fav_provider)
 
         if providers_to_load:
             self.load_epgs_async(providers_to_load)
