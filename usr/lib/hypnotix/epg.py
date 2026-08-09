@@ -80,10 +80,12 @@ class IPTVSimpleMatcher:
         """Removes technical tags (HD, FHD, 1080p, etc.) and clean residual punctuation."""
         if not text:
             return ""
+        # remove anything inside parentheses/brackets (e.g. "(AC3 eng)")
+        clean = re.sub(r'\s*[(\[].*?[)\]]', '', text)
         # Strip tech terms
-        clean = cls.TECH_TAGS_REGEX.sub('', text)
+        clean = cls.TECH_TAGS_REGEX.sub('', clean)
         # Clean up empty brackets, pipes, or leftover punctuation
-        clean = re.sub(r'[\(\[\{\|\}\]\)]', ' ', clean)
+        clean = re.sub(r'[()\[\]{}|]', ' ', clean)
         # Normalize whitespace
         return ' '.join(clean.split())
 
