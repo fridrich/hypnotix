@@ -794,10 +794,11 @@ class MainWindow:
                         info = info.replace('#EXTINF:-1', f'#EXTINF:-1 tvg-id="{matched_channel.xmltv_id}"', 1)
 
                     # Update or inject tvg-name as requested
+                    new_tvg_name = matched_channel.tvg_name or matched_channel.name
                     if 'tvg-name="' in info:
-                        info = re.sub(r'tvg-name="[^"]*"', f'tvg-name="{matched_channel.xmltv_id}"', info)
+                        info = re.sub(r'tvg-name="[^"]*"', f'tvg-name="{new_tvg_name}"', info)
                     else:
-                        info = info.replace('#EXTINF:-1', f'#EXTINF:-1 tvg-name="{matched_channel.xmltv_id}"', 1)
+                        info = info.replace('#EXTINF:-1', f'#EXTINF:-1 tvg-name="{new_tvg_name}"', 1)
 
                     parts[0] = info
 
