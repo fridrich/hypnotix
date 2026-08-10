@@ -1473,6 +1473,7 @@ class MainWindow:
         self.new_name_entry.set_text("")
         self.new_url_entry.set_text("")
         self.new_logo_entry.set_text("")
+        self.favorites_epg_entry.set_text("")
         self.new_ok_button.set_sensitive(False)
         self.navigate_to("new_channel_page")
 
