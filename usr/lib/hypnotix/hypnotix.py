@@ -321,6 +321,7 @@ class MainWindow:
             "status_label",
             "status_bar",
             "sidebar",
+            "sidebar_vbox",
             "go_back_button",
             "search_button",
             "search_bar",
@@ -848,6 +849,16 @@ class MainWindow:
                     widget.update_epg(provider.epg_manager)
                 else:
                     widget.update_epg(None)
+
+        # Also asynchronously update the EPG Guide widget if it's currently loaded
+        if getattr(self, "active_provider", None):
+            channels = getattr(self.active_provider, "channels", [])
+            # In case we are currently filtering by search, or looking at favorites
+            # Note: A safer approach is to pass exactly the channels currently drawn in the listbox
+            visible_channels = [w.channel for w in self.channels_listbox.get_children() if isinstance(w, ChannelWidget)]
+            epg_mgr = getattr(self.active_provider, "epg_manager", None)
+            self.guide_widget.render_guide(visible_channels, epg_mgr)
+
         return True
 
     def show_channel_epg_info(self, channel):
