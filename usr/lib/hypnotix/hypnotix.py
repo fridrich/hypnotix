@@ -711,8 +711,20 @@ class MainWindow:
         self.content_type = TV_GROUP
         channels = []
 
-        fav_provider = Provider("Favorites", None)
-        fav_provider.epg = self.settings.get_string("favorites-epg").strip()
+        if not getattr(self, "fav_provider", None):
+            self.fav_provider = Provider("Favorites", None)
+            self.dynamic_fav_providers = {}
+
+        new_epg = self.settings.get_string("favorites-epg").strip()
+        if getattr(self.fav_provider, "epg", None) != new_epg:
+            self.fav_provider.epg = new_epg
+            if hasattr(self.fav_provider, "epg_manager"):
+                delattr(self.fav_provider, "epg_manager")
+
+        self.fav_provider.channels = []
+        for dp in self.dynamic_fav_providers.values():
+            dp.channels = []
+
         providers_to_load = []
 
         for line in self.favorite_data:
@@ -722,9 +734,9 @@ class MainWindow:
             parts = line.split(":::")
             info, url = parts[0], parts[1]
 
-            channel = Channel(fav_provider, info)
+            channel = Channel(self.fav_provider, info)
             channel.url = url
-            channel.provider = fav_provider
+            channel.provider = self.fav_provider
             if len(parts) > 3:
                 channel.xmltv_id = parts[3]
 
@@ -741,13 +753,25 @@ class MainWindow:
 
             # Add manual/unmatched channels to fav_provider so it can map their EPG
             if not matched_existing:
-                fav_provider.channels.append(channel)
+                if len(parts) > 2 and parts[2].strip():
+                    epg_url = parts[2].strip()
+                    if epg_url not in self.dynamic_fav_providers:
+                        dp = Provider(f"Favorites-Custom-{len(self.dynamic_fav_providers)}", None)
+                        dp.epg = f"{epg_url} {self.fav_provider.epg}".strip()
+                        self.dynamic_fav_providers[epg_url] = dp
+                        providers_to_load.append(dp)
+                    dp = self.dynamic_fav_providers[epg_url]
+                    channel.provider = dp
+                    dp.channels.append(channel)
+                else:
+                    # Add manual/unmatched channels to fav_provider so it can map their EPG
+                    self.fav_provider.channels.append(channel)
 
             channels.append(channel)
 
         # Queue the fav_provider to load its EPG database asynchronously
-        if fav_provider.channels and fav_provider.epg and not hasattr(fav_provider, "epg_manager"):
-            providers_to_load.append(fav_provider)
+        if self.fav_provider.channels and self.fav_provider.epg and not hasattr(self.fav_provider, "epg_manager"):
+            providers_to_load.append(self.fav_provider)
 
         if providers_to_load:
             self.load_epgs_async(providers_to_load)
