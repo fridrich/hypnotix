@@ -277,11 +277,11 @@ class EPGGuideWidget(Gtk.Box):
 
         # Sync Date Label visibility with Guide Page visibility
         self.main_window.channel_stack.connect("notify::visible-child-name", self.on_visibility_changed)
-        self.main_window.sidebar.connect("notify::visible", self.on_visibility_changed)
+        self.main_window.sidebar_vbox.connect("notify::visible", self.on_visibility_changed)
 
     def on_visibility_changed(self, widget, param):
         is_guide = self.main_window.channel_stack.get_visible_child_name() == "guide_page"
-        if is_guide and self.main_window.sidebar.get_visible():
+        if is_guide and self.main_window.sidebar_vbox.get_visible():
             self.date_label.show()
         else:
             self.date_label.hide()

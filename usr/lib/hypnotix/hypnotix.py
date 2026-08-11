@@ -856,7 +856,10 @@ class MainWindow:
     def show_channels(self, channels, favorites=False):
         self.navigate_to("channels_page", "", favorites)
         if self.content_type == TV_GROUP:
-            self.sidebar.show()
+            if self.fullscreen and getattr(self, "active_channel", None) is not None:
+                self.sidebar_vbox.hide()
+            else:
+                self.sidebar_vbox.show()
             for child in self.channels_listbox.get_children():
                 self.channels_listbox.remove(child)
 
@@ -882,7 +885,7 @@ class MainWindow:
             if len(logos_to_refresh) > 0:
                 self.download_channel_logos(logos_to_refresh)
         else:
-            self.sidebar.hide()
+            self.sidebar_vbox.hide()
 
     @idle_function
     def update_epg_labels(self):
@@ -1366,7 +1369,7 @@ class MainWindow:
     def before_play(self, channel):
         self.channel_stack.set_visible_child_name("channel_page")
         if self.fullscreen:
-            self.sidebar.hide()
+            self.sidebar_vbox.hide()
             if getattr(self, "cursor_hide_timer_id", 0) > 0:
                 GLib.source_remove(self.cursor_hide_timer_id)
             self.cursor_hide_timer_id = GLib.timeout_add(2000, self.hide_cursor)
@@ -1541,8 +1544,6 @@ class MainWindow:
         self.label_channel_name.set_text("")
         self.label_channel_url.set_text("")
         self.channel_stack.set_visible_child_name("guide_page")
-        # if self.fullscreen and self.content_type == TV_GROUP:
-        #     self.sidebar.show()
         if self.fullscreen:
             gdk_win = self.window.get_window()
             if gdk_win:
@@ -1551,7 +1552,7 @@ class MainWindow:
                 GLib.source_remove(self.cursor_hide_timer_id)
                 self.cursor_hide_timer_id = 0
             if self.content_type == TV_GROUP:
-                self.sidebar.show()
+                self.sidebar_vbox.show()
 
     def on_pause_button(self, widget):
         self.mpv.pause = not self.mpv.pause
@@ -2258,17 +2259,17 @@ class MainWindow:
         self.mpv_top_box.show()
         self.mpv_bottom_box.hide()
         if self.content_type == TV_GROUP:
-            self.sidebar.show()
+            self.sidebar_vbox.show()
         self.headerbar.show()
         self.channels_box.set_border_width(12)
         self.fullscreen = False
 
     def theather_mode(self):
         if self.stack.get_visible_child_name() == "channels_page":
-            if self.sidebar.get_visible():
+            if self.sidebar_vbox.get_visible():
                 self.mpv_top_box.hide()
                 self.mpv_bottom_box.hide()
-                self.sidebar.hide()
+                self.sidebar_vbox.hide()
                 # self.headerbar.hide()
                 self.status_label.hide()
                 self.channels_box.set_border_width(0)
@@ -2280,7 +2281,7 @@ class MainWindow:
             if self.headerbar.get_visible():
                 self.mpv_top_box.hide()
                 self.mpv_bottom_box.hide()
-                self.sidebar.hide()
+                self.sidebar_vbox.hide()
                 self.headerbar.hide()
                 self.status_label.hide()
                 self.channels_box.set_border_width(0)
@@ -2298,8 +2299,8 @@ class MainWindow:
                 if not getattr(self, "mouse_poll_timer_id", 0):
                     self.last_mouse_pos = None
                     self.mouse_poll_timer_id = GLib.timeout_add(200, self.poll_mouse_position)
-                self.sidebar.hide()
                 if self.active_channel is not None:
+                    self.sidebar_vbox.hide()
                     if getattr(self, "cursor_hide_timer_id", 0) > 0:
                         GLib.source_remove(self.cursor_hide_timer_id)
                     self.cursor_hide_timer_id = GLib.timeout_add(2000, self.hide_cursor)
