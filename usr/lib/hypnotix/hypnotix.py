@@ -1924,6 +1924,9 @@ class MainWindow:
 
     @async_function
     def reload(self, page=None, refresh=False):
+        if page is not None:
+            self.navigate_to(page)
+
         self.favorite_data = self.manager.load_favorites()
         self.status(_("Loading providers..."))
         self.providers = []
@@ -2021,8 +2024,6 @@ class MainWindow:
 
         self.refresh_providers_page()
 
-        if page is not None:
-            self.navigate_to(page)
         self.status(None)
         self.latest_search_bar_text = None
 
