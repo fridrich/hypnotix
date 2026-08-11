@@ -33,6 +33,7 @@ from unidecode import unidecode
 
 from common import Manager, Provider, Channel, MOVIES_GROUP, PROVIDERS_PATH, SERIES_GROUP, TV_GROUP,\
     async_function, idle_function
+from guide import EPGGuideWidget
 
 
 setproctitle.setproctitle("hypnotix")
@@ -412,6 +413,10 @@ class MainWindow:
                 sys.exit(1)
             else:
                 setattr(self, name, widget)
+
+        self.guide_widget = EPGGuideWidget(self)
+        self.guide_widget.show_all()
+        self.channel_stack.add_named(self.guide_widget, "guide_page")
 
         # Widget signals
         self.window.connect("delete-event", self.on_window_delete)
@@ -817,6 +822,16 @@ class MainWindow:
                 self.channels_listbox.add(ChannelWidget(channel, image, main_window=self))
 
             self.channels_listbox.show_all()
+
+            if self.active_channel is None:
+                self.channel_stack.set_visible_child_name("guide_page")
+                self.label_channel_name.set_text("")
+                self.label_channel_url.set_text("")
+
+                provider = getattr(self, "active_provider", None)
+                epg_mgr = getattr(provider, "epg_manager", None) if provider else None
+                self.guide_widget.render_guide(channels, epg_mgr)
+
             self.update_epg_labels()
             self.visible_search_results = len(self.channels_listbox.get_children())
             if len(logos_to_refresh) > 0:
@@ -1403,6 +1418,9 @@ class MainWindow:
         self.active_channel = None
         self.info_menu_item.set_sensitive(False)
         self.playback_bar.hide()
+        self.label_channel_name.set_text("")
+        self.label_channel_url.set_text("")
+        self.channel_stack.set_visible_child_name("guide_page")
 
     def on_pause_button(self, widget):
         self.mpv.pause = not self.mpv.pause
