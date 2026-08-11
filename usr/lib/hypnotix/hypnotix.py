@@ -857,7 +857,7 @@ class MainWindow:
             # Note: A safer approach is to pass exactly the channels currently drawn in the listbox
             visible_channels = [w.channel for w in self.channels_listbox.get_children() if isinstance(w, ChannelWidget)]
             epg_mgr = getattr(self.active_provider, "epg_manager", None)
-            self.guide_widget.render_guide(visible_channels, epg_mgr)
+            self.guide_widget.render_guide(visible_channels, epg_mgr, initial_load=False)
 
         return True
 

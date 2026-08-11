@@ -3,7 +3,7 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gtk, Gdk, Pango, PangoCairo, GdkPixbuf
+from gi.repository import Gtk, Gdk, Pango, PangoCairo, GdkPixbuf, GLib
 import gettext
 _ = gettext.gettext
 
@@ -210,10 +210,22 @@ class EPGGuideWidget(Gtk.Box):
         # Time Header (Right Panel Top)
         self.time_header_scroll = Gtk.ScrolledWindow()
         self.time_header_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
-        self.time_header_scroll.set_size_request(-1, 30)
+        self.time_header_scroll.set_size_request(-1, 40)
         self.time_header_layout = Gtk.Layout()
         self.time_header_scroll.add(self.time_header_layout)
-        self.pack_start(self.time_header_scroll, False, False, 0)
+
+        self.now_button = Gtk.Button(label=_("Now"))
+        self.now_button.set_valign(Gtk.Align.CENTER)
+        self.now_button.set_halign(Gtk.Align.END)
+        self.now_button.set_margin_end(0)
+        self.now_button.set_tooltip_text(_("Scroll to current time"))
+        self.now_button.connect("clicked", self.on_now_button_clicked)
+
+        self.time_header_overlay = Gtk.Overlay()
+        self.time_header_overlay.add(self.time_header_scroll)
+        self.time_header_overlay.add_overlay(self.now_button)
+
+        self.pack_start(self.time_header_overlay, False, False, 0)
 
         # Timeline Grid (Right Panel Bottom)
         self.timeline_scroll = Gtk.ScrolledWindow()
@@ -234,8 +246,8 @@ class EPGGuideWidget(Gtk.Box):
         # Date Label (Left Panel Top)
         self.date_label = Gtk.Label()
         self.date_label.set_xalign(0.5)
-        self.date_label.set_valign(Gtk.Align.CENTER)
-        self.date_label.set_size_request(-1, 30)
+        self.date_label.set_valign(Gtk.Align.END)
+        self.date_label.set_size_request(-1, 40)
         self.date_label.set_use_markup(True)
         # Prevent it from showing initially until we verify visibility
         self.date_label.set_no_show_all(True)
@@ -267,7 +279,11 @@ class EPGGuideWidget(Gtk.Box):
         date_str = time.strftime("%A, %d %b", time.localtime(current_visible_time))
         self.date_label.set_markup(f"<b>{date_str}</b>")
 
-    def render_guide(self, channels, epg_manager):
+    def on_now_button_clicked(self, widget):
+        current_time = int(time.time())
+        self.scroll_to_now(current_time)
+
+    def render_guide(self, channels, epg_manager, initial_load=True):
         self.channels = channels
         self.channel_widgets = self.main_window.channels_listbox.get_children()
         self.epg_manager = epg_manager
@@ -276,8 +292,26 @@ class EPGGuideWidget(Gtk.Box):
             self.time_header_layout.remove(child)
 
         current_time = int(time.time())
-        self.start_window = current_time - 3600
-        self.end_window = current_time + (12 * 3600)
+        min_start = current_time - 3600
+        max_stop = current_time + (12 * 3600)
+
+        # Calculate dynamic bounds based on actual data
+        has_any_data = False
+        if self.epg_manager:
+            for channel in channels:
+                xmltv_id = getattr(channel, "xmltv_id", None)
+                if xmltv_id and xmltv_id in self.epg_manager.programmes:
+                    for prog in self.epg_manager.programmes[xmltv_id]:
+                        if not has_any_data:
+                            min_start = prog["start"]
+                            max_stop = prog["stop"]
+                            has_any_data = True
+                        else:
+                            if prog["start"] < min_start: min_start = prog["start"]
+                            if prog["stop"] > max_stop: max_stop = prog["stop"]
+
+        self.start_window = min_start
+        self.end_window = max_stop
 
         total_width = int(((self.end_window - self.start_window) / 60) * PIXELS_PER_MINUTE)
 
@@ -291,9 +325,9 @@ class EPGGuideWidget(Gtk.Box):
             time_str = time.strftime("%H:%M", time.localtime(t))
             lbl = Gtk.Label(label=f"<b>{time_str}</b>")
             lbl.set_use_markup(True)
-            self.time_header_layout.put(lbl, x_pos, 5)
+            self.time_header_layout.put(lbl, x_pos, 20)
 
-        self.time_header_layout.set_size(total_width, 30)
+        self.time_header_layout.set_size(total_width, 40)
 
         total_height = 0
         for widget in self.channel_widgets:
@@ -307,3 +341,23 @@ class EPGGuideWidget(Gtk.Box):
         self.on_scroll_changed(self.timeline_scroll.get_hadjustment())
         self.show_all()
         self.on_visibility_changed(None, None)
+
+        if initial_load:
+            # Scroll to 'now'
+            GLib.idle_add(self.scroll_to_now, current_time)
+
+    def scroll_to_now(self, current_time):
+        if not self.start_window:
+            return False
+
+        hadj = self.timeline_scroll.get_hadjustment()
+        # Calculate X position of current time
+        now_x = ((current_time - self.start_window) / 60) * PIXELS_PER_MINUTE
+
+        # Try to center 'now' on screen by subtracting half the visible width,
+        # but don't go below 0 (start of timeline).
+        visible_width = hadj.get_page_size()
+        target_x = max(0, now_x - (visible_width / 2))
+
+        hadj.set_value(target_x)
+        return False
