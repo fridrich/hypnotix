@@ -72,9 +72,24 @@ class EPGTimeline(Gtk.DrawingArea):
     def on_query_tooltip(self, widget, x, y, keyboard_mode, tooltip):
         prog = self.get_program_at_pos(x, y)
         if prog:
-            text = prog.get("desc", "") or prog.get("title", "")
-            tooltip.set_text(text)
-            return True
+            title = prog.get("title", "")
+            desc = prog.get("desc", "")
+
+            tooltip_markup = ""
+            if title:
+                # Escape ampersands/angles in the raw string so Pango doesn't crash on bad markup
+                title_escaped = GLib.markup_escape_text(title)
+                tooltip_markup += f"<b>{title_escaped}</b>"
+            if desc:
+                desc_escaped = GLib.markup_escape_text(desc)
+                if tooltip_markup:
+                    tooltip_markup += f"\n{desc_escaped}"
+                else:
+                    tooltip_markup = desc_escaped
+
+            if tooltip_markup:
+                tooltip.set_markup(tooltip_markup)
+                return True
         return False
 
     def on_draw(self, widget, cr):
