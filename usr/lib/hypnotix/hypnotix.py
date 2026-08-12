@@ -1998,7 +1998,7 @@ class MainWindow:
                             start_str = datetime.datetime.fromtimestamp(now_playing["start"]).strftime("%H:%M")
                             stop_str = datetime.datetime.fromtimestamp(now_playing["stop"]).strftime("%H:%M")
                             title = now_playing.get("title", "")
-                            osd_text = f"{self.active_channel.name}\n{title}\n{start_str} - {stop_str}"
+                            osd_text = f"{title}\n{start_str} - {stop_str}"
                             self.mpv.show_osd_text(osd_text, 6000)
                             self.osd_epg_visible_until = time.time() + 6
             return True
