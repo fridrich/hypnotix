@@ -1,3 +1,4 @@
+import datetime
 import time
 import gi
 
@@ -74,18 +75,25 @@ class EPGTimeline(Gtk.DrawingArea):
         if prog:
             title = prog.get("title", "")
             desc = prog.get("desc", "")
+            start = prog.get("start", "")
+            stop = prog.get("stop", "")
 
             tooltip_markup = ""
             if title:
                 # Escape ampersands/angles in the raw string so Pango doesn't crash on bad markup
                 title_escaped = GLib.markup_escape_text(title)
                 tooltip_markup += f"<b>{title_escaped}</b>"
+            if start and stop:
+                start_str = datetime.datetime.fromtimestamp(start).strftime("%H:%M")
+                stop_str = datetime.datetime.fromtimestamp(stop).strftime("%H:%M")
+                if tooltip_markup:
+                    tooltip_markup += "\n"
+                tooltip_markup += f"{start_str} - {stop_str}"
             if desc:
                 desc_escaped = GLib.markup_escape_text(desc)
                 if tooltip_markup:
-                    tooltip_markup += f"\n{desc_escaped}"
-                else:
-                    tooltip_markup = desc_escaped
+                    tooltip_markup += "\n"
+                tooltip_markup += desc_escaped
 
             if tooltip_markup:
                 tooltip.set_markup(tooltip_markup)
