@@ -9,7 +9,7 @@ import urllib.error
 import xml.etree.ElementTree as ET
 from email.utils import formatdate
 
-from common import EPG_PATH, async_function, slugify
+from common import EPG_PATH, slugify
 
 
 def parse_xmltv_time(s: str) -> int:
@@ -180,7 +180,6 @@ class XMLTVParser:
     def parse_programmes(cls, file_path: str, valid_xmltv_ids: set = None):
         """Pass 2: Parses <programme> elements, pruning past shows and unmatched channels."""
         programmes = {}
-        now = int(time.time())
 
         try:
             with cls._open_source(file_path) as f:
@@ -229,25 +228,6 @@ class EPGManager:
     def __init__(self, user_agent="Hypnotix"):
         self.user_agent = user_agent
         self.programmes = {}  # { xmltv_id: [program_dicts] }
-
-    def resolve_epg_path(self, provider) -> str:
-        """Resolves provider.epg into a local file path."""
-        epg_src = provider.epg.strip() if provider.epg else ""
-        if not epg_src:
-            return None
-
-        # Local file URI or raw filesystem path
-        if epg_src.startswith("file://") or epg_src.startswith("/"):
-            path = epg_src[7:] if epg_src.startswith("file://") else epg_src
-            return os.path.expanduser(path)
-
-        # Remote URL: cache locally in ~/.cache/hypnotix/epg/
-        ext = ".xml.gz" if epg_src.endswith(".gz") else ".xml"
-        return os.path.join(EPG_PATH, f"{slugify(provider.name)}{ext}")
-
-    def get_db_path(self, local_path: str) -> str:
-        """Returns the SQLite database cache path corresponding to the XML file."""
-        return local_path + ".db"
 
     def is_cache_valid(self, local_path: str, ttl_hours: int = 24) -> bool:
         """Checks if the local cache file exists and is newer than TTL."""
