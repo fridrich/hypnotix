@@ -855,7 +855,6 @@ class MainWindow:
 
         # Also asynchronously update the EPG Guide widget if it's currently loaded
         if getattr(self, "active_provider", None):
-            channels = getattr(self.active_provider, "channels", [])
             # In case we are currently filtering by search, or looking at favorites
             # Note: A safer approach is to pass exactly the channels currently drawn in the listbox
             visible_channels = [w.channel for w in self.channels_listbox.get_children() if isinstance(w, ChannelWidget)]
@@ -863,62 +862,6 @@ class MainWindow:
             self.guide_widget.render_guide(visible_channels, epg_mgr, initial_load=False)
 
         return True
-
-    def show_channel_epg_info(self, channel):
-        """Displays EPG details for current and next program of a channel."""
-        dialog = Gtk.Dialog(title=_("Channel Info - %s") % channel.name, transient_for=self.window, flags=0)
-        dialog.add_button(_("Close"), Gtk.ResponseType.CLOSE)
-        dialog.set_default_size(450, 300)
-
-        box = dialog.get_content_area()
-        box.set_spacing(12)
-        box.set_border_width(12)
-
-        provider = getattr(channel, "provider", None) or getattr(self, "active_provider", None)
-        epg_mgr = getattr(provider, "epg_manager", None) if provider else None
-        now_playing, next_up = (None, None)
-        if epg_mgr and getattr(channel, "xmltv_id", None):
-            now_playing, next_up = epg_mgr.get_current_and_next(channel.xmltv_id)
-
-        if not now_playing and not next_up:
-            label = Gtk.Label(label=_("No EPG information available for this channel."))
-            box.pack_start(label, True, True, 0)
-        else:
-            grid = Gtk.Grid(column_spacing=12, row_spacing=8)
-            row = 0
-
-            for title_hdr, prog in [(_("Now Playing"), now_playing), (_("Next Up"), next_up)]:
-                if prog:
-                    start_str = datetime.datetime.fromtimestamp(prog["start"]).strftime("%H:%M")
-                    stop_str = datetime.datetime.fromtimestamp(prog["stop"]).strftime("%H:%M")
-
-                    hdr_label = Gtk.Label()
-                    hdr_label.set_markup(_("<b>%s (%s - %s):</b>") % (title_hdr, start_str, stop_str))
-                    hdr_label.set_xalign(0)
-                    grid.attach(hdr_label, 0, row, 1, 1)
-                    row += 1
-
-                    title_lbl = Gtk.Label(label=prog.get("title", ""))
-                    title_lbl.set_xalign(0)
-                    grid.attach(title_lbl, 0, row, 1, 1)
-                    row += 1
-
-                    if prog.get("desc"):
-                        desc_lbl = Gtk.Label(label=prog["desc"])
-                        desc_lbl.set_xalign(0)
-                        desc_lbl.set_line_wrap(True)
-                        desc_lbl.get_style_context().add_class("dim-label")
-                        grid.attach(desc_lbl, 0, row, 1, 1)
-                        row += 1
-
-            scrolled = Gtk.ScrolledWindow()
-            scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            scrolled.add(grid)
-            box.pack_start(scrolled, True, True, 0)
-
-        dialog.show_all()
-        dialog.run()
-        dialog.destroy()
 
     def show_vod(self, items):
         logos_to_refresh = []
