@@ -237,16 +237,34 @@ class EPGManager:
         return (time.time() - mtime) < (ttl_hours * 3600)
 
     def is_db_valid(self, db_path: str, xml_path: str) -> bool:
-        """Checks if the SQLite database exists and is newer than the XMLTV file."""
+        """Checks if the SQLite database exists, is newer than the XMLTV file, and has required tables."""
         if not db_path or not os.path.exists(db_path):
             return False
+            
+        # Check timestamps first to fail fast
+        is_newer = False
         if isinstance(xml_path, list):
+            is_newer = True
             for xp in xml_path:
                 if not os.path.exists(xp) or os.path.getmtime(db_path) < os.path.getmtime(xp):
-                    return False
-            return True
+                    is_newer = False
+                    break
         else:
-            return os.path.exists(xml_path) and os.path.getmtime(db_path) >= os.path.getmtime(xml_path)
+            is_newer = os.path.exists(xml_path) and os.path.getmtime(db_path) >= os.path.getmtime(xml_path)
+            
+        if not is_newer:
+            return False
+            
+        # Verify schema is intact (tables exist)
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT count(name) FROM sqlite_master WHERE type='table' AND name IN ('channels', 'programmes')")
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count == 2
+        except sqlite3.OperationalError:
+            return False
 
     def download_epg(self, epg_url: str, local_path: str) -> bool:
         """Downloads a remote EPG XML file to the local cache path."""
