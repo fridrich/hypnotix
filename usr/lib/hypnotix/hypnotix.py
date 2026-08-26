@@ -128,6 +128,9 @@ class ChannelWidget(Gtk.ListBoxRow):
         return self._channel
 
     def update_epg(self, epg_manager):
+        if self.name_label.get_text() != self._channel.name:
+            self.name_label.set_text(self._channel.name)
+            self.set_tooltip_text(self._channel.name)
         if epg_manager and getattr(self._channel, "xmltv_id", None):
             now_playing, _ = epg_manager.get_current_and_next(self._channel.xmltv_id)
             if now_playing and "title" in now_playing:
@@ -602,7 +605,7 @@ class MainWindow:
         self._timerid = GLib.timeout_add_seconds(self.reload_timeout_sec, self.force_reload)
 
         # Refresh EPG show titles every 60 seconds
-        GLib.timeout_add_seconds(60, self.update_epg_labels)
+        GLib.timeout_add_seconds(60, self.refresh_epg_labels_periodic)
 
         self.window.show()
         self.playback_bar.hide()
@@ -753,7 +756,9 @@ class MainWindow:
                     if getattr(p, "epg", None) == epg_url:
                         channel.provider = p
                         matched_existing = True
-                        if p not in providers_to_load and not hasattr(p, "epg_manager"):
+                        if channel not in p.channels:
+                            p.channels.append(channel)
+                        if p not in providers_to_load and (not hasattr(p, "epg_manager") or not channel.xmltv_id):
                             providers_to_load.append(p)
                         break
 
@@ -795,8 +800,8 @@ class MainWindow:
 
     def save_matched_favorites_idle(self, providers):
         import re
-        fav_provider = next((p for p in providers if p.name == "Favorites"), None)
-        if not fav_provider:
+        all_channels = [c for p in providers for c in p.channels]
+        if not all_channels:
             return False
 
         updated = False
@@ -811,7 +816,7 @@ class MainWindow:
             info, url = parts[0], parts[1]
 
             # Find the corresponding channel to see if the EPG Manager assigned it an xmltv_id
-            matched_channel = next((c for c in fav_provider.channels if c.url == url), None)
+            matched_channel = next((c for c in all_channels if c.url == url), None)
 
             if matched_channel and matched_channel.xmltv_id:
                 # If the tvg-id in the EXTINF string doesn't perfectly match the resolved xmltv_id, rewrite it
@@ -887,7 +892,6 @@ class MainWindow:
         else:
             self.sidebar_vbox.hide()
 
-    @idle_function
     def update_epg_labels(self):
         for widget in self.channels_listbox.get_children():
             if isinstance(widget, ChannelWidget):
@@ -905,6 +909,9 @@ class MainWindow:
             epg_mgr = getattr(self.active_provider, "epg_manager", None)
             self.guide_widget.render_guide(visible_channels, epg_mgr, initial_load=False)
 
+    def refresh_epg_labels_periodic(self):
+        # Called from GLib.timeout_add_seconds, which requires True to keep repeating
+        self.update_epg_labels()
         return True
 
     def show_vod(self, items):
@@ -1230,14 +1237,22 @@ class MainWindow:
         window.set_title(_("Hypnotix"))
         window.show()
 
+    def find_favorite_line(self, url):
+        """A channel's URL is the stable identifier; the info field can be rewritten in place
+        (tvg-id/tvg-name injection) so it must not be part of the match key."""
+        for fav in self.favorite_data:
+            parts = fav.split(":::")
+            if len(parts) > 1 and parts[1] == url:
+                return fav
+        return None
+
     def on_favorite_button_toggled(self, widget):
         if self.page_is_loading or getattr(self, "active_channel", None) is None:
             return
 
         name = self.active_channel.name
 
-        data_prefix = f"{self.active_channel.info}:::{self.active_channel.url}"
-        existing_match = next((fav for fav in self.favorite_data if fav == data_prefix or fav.startswith(data_prefix + ":::")), None)
+        existing_match = self.find_favorite_line(self.active_channel.url)
 
         if widget.get_active() and not existing_match:
             print (f"Adding {name} to favorites")
@@ -1246,7 +1261,7 @@ class MainWindow:
             provider = getattr(self.active_channel, "provider", None) or getattr(self, "active_provider", None)
             if provider and getattr(provider, "epg", None):
                 epg_url = provider.epg
-            data = f"{data_prefix}:::{epg_url}:::{xmltv_id}"
+            data = f"{self.active_channel.info}:::{self.active_channel.url}:::{epg_url}:::{xmltv_id}"
             self.favorite_data.append(data)
 
             # Dynamically update the tooltip
@@ -1333,9 +1348,7 @@ class MainWindow:
         self.label_channel_url.set_text(channel.url)
 
         self.page_is_loading = True
-
-        data = f"{channel.info}:::{channel.url}"
-        if data in self.favorite_data:
+        if self.find_favorite_line(channel.url) is not None:
             self.favorite_button.set_active(True)
             self.favorite_button_image.set_from_icon_name("xsi-starred-symbolic", Gtk.IconSize.BUTTON)
             self.favorite_button.set_tooltip_text(_("Remove from favorites"))
@@ -1929,7 +1942,7 @@ class MainWindow:
         # Bool of Control modifier state
         ctrl = modifier == Gdk.ModifierType.CONTROL_MASK
 
-        if event.keyval == Gdk.KEY_g and not isinstance(widget.get_focus(), Gtk.Entry):
+        if event.keyval == Gdk.KEY_g and not isinstance(widget.get_focus(), Gtk.Entry) and self.mpv is not None:
             # If the EPG is currently showing, toggle it off
             if getattr(self, "osd_epg_visible_until", 0) > time.time():
                 self.mpv.show_osd_text("", 1)
@@ -1996,9 +2009,6 @@ class MainWindow:
 
     @async_function
     def reload(self, page=None, refresh=False):
-        if page is not None:
-            self.navigate_to(page)
-
         self.favorite_data = self.manager.load_favorites()
         self.status(_("Loading providers..."))
         self.providers = []
@@ -2095,6 +2105,9 @@ class MainWindow:
                 GLib.idle_add(self.update_epg_labels)
 
         self.refresh_providers_page()
+
+        if page is not None:
+            self.navigate_to(page)
 
         self.status(None)
         self.latest_search_bar_text = None
