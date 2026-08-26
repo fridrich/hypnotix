@@ -180,6 +180,8 @@ class XMLTVParser:
     def parse_programmes(cls, file_path: str, valid_xmltv_ids: set = None):
         """Pass 2: Parses <programme> elements, pruning past shows and unmatched channels."""
         programmes = {}
+        # Keep a bit of trailing history (matches guide.py's default 1h-in-the-past window)
+        past_cutoff = int(time.time()) - 3600
 
         try:
             with cls._open_source(file_path) as f:
@@ -198,6 +200,10 @@ class XMLTVParser:
 
                         stop = parse_xmltv_time(elem.attrib.get("stop"))
                         start = parse_xmltv_time(elem.attrib.get("start"))
+
+                        if stop and stop < past_cutoff:
+                            elem.clear()
+                            continue
 
                         title_elem = elem.find("title")
                         title = title_elem.text if title_elem is not None else ""
@@ -268,13 +274,16 @@ class EPGManager:
 
     def download_epg(self, epg_url: str, local_path: str) -> bool:
         """Downloads a remote EPG XML file to the local cache path."""
+        tmp_path = f"{local_path}.part"
         try:
             req = urllib.request.Request(epg_url, headers={"User-Agent": self.user_agent})
             if os.path.exists(local_path):
                 mtime = os.path.getmtime(local_path)
                 req.add_header("If-Modified-Since", formatdate(mtime, usegmt=True))
-            with urllib.request.urlopen(req, timeout=30) as resp, open(local_path, "wb") as out:
+            # Download to a temp file first so an interrupted transfer never clobbers a valid cache
+            with urllib.request.urlopen(req, timeout=30) as resp, open(tmp_path, "wb") as out:
                 out.write(resp.read())
+            os.replace(tmp_path, local_path)
             return True
         except urllib.error.HTTPError as e:
             if e.code == 304:
@@ -285,6 +294,9 @@ class EPGManager:
         except Exception as e:
             print(f"[EPG] Download failed for {epg_url}: {e}")
             return False
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     def save_to_db(self, db_path: str, channels: list, programmes: dict):
         """Caches parsed XMLTV channels and programmes into SQLite."""
@@ -343,7 +355,8 @@ class EPGManager:
         return channels
 
     def load_programmes_from_db(self, db_path: str, valid_xmltv_ids: set = None) -> dict:
-        """Loads all EPG programmes from SQLite database (including historical)."""
+        """Loads EPG programmes from SQLite database, pruning shows older than the guide's past window."""
+        past_cutoff = int(time.time()) - 3600
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT channel_id, start, stop, title, desc FROM programmes")
@@ -351,6 +364,8 @@ class EPGManager:
         programmes = {}
         for cid, start, stop, title, desc in cursor.fetchall():
             if valid_xmltv_ids is not None and cid not in valid_xmltv_ids:
+                continue
+            if stop and stop < past_cutoff:
                 continue
             if cid not in programmes:
                 programmes[cid] = []
